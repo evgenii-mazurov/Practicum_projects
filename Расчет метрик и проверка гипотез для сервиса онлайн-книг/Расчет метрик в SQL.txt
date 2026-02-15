@@ -1,0 +1,133 @@
+-- 1. Расчет MAU авторов в Яндекс.Книгах
+SELECT a.main_author_name,
+COUNT (DISTINCT au.puid) AS mau
+FROM bookmate.audition as au
+INNER JOIN bookmate.content as c ON c.main_content_id=au.main_content_id
+INNER JOIN bookmate.author as a ON a.main_author_id=c.main_author_id
+WHERE LEFT(TO_CHAR(au.msk_business_dt_str, 'YYYY-MM-DD'), 7) = '2024-11'
+GROUP BY a.main_author_name
+ORDER BY mau DESC
+LIMIT 3;
+
+--Результат
+main_author_name	mau
+Андрей Усачев	7107
+Лиана Шнайдер	3338
+Игорь Носов	3063
+
+-- 2. Расчет MAU произведений
+SELECT c.main_content_name,
+       c.published_topic_title_list,
+       a.main_author_name,
+       COUNT(DISTINCT au.puid) AS mau 
+FROM bookmate.audition AS au 
+INNER JOIN bookmate.content as c ON c.main_content_id = au.main_content_id
+INNER JOIN bookmate.author AS a ON a.main_author_id = c.main_author_id
+WHERE LEFT(TO_CHAR(au.msk_business_dt_str, 'YYYY-MM-DD'), 7) = '2024-11'
+GROUP BY a.main_author_name, c.main_content_name, c.published_topic_title_list
+ORDER BY mau DESC
+LIMIT 3;
+
+-- Результат
+main_content_name	published_topic_title_list	main_author_name	mau
+Собачка Соня на даче	['Детская проза и поэзия', 'Аудио']	Андрей Усачев	4597
+Женькин клад и другие школьные рассказы	['Сказки и фольклор', 'Детская проза и поэзия', 'Аудио']	Игорь Носов	3050
+Знаменитая собачка Соня	['Аудиоспектакли', 'Детская проза и поэзия', 'Аудио']	Андрей Усачев	2785
+
+-- 3. Расчет Retention Rate
+WITH daily_activity AS (
+    -- активность пользователей по дням
+    SELECT (msk_business_dt_str - DATE '2024-12-02')::INTEGER AS day_since_install,
+           COUNT(DISTINCT au.puid) AS retained_users,
+           MAX (COUNT(DISTINCT au.puid)) OVER () AS max_users
+    FROM bookmate.audition AS au
+    WHERE msk_business_dt_str BETWEEN DATE '2024-12-02' AND DATE '2024-12-11'
+    AND au.puid IN(
+        SELECT DISTINCT puid
+        FROM bookmate.audition AS au
+        WHERE msk_business_dt_str = DATE '2024-12-02'
+    )
+    GROUP BY msk_business_dt_str
+)
+SELECT da.day_since_install,
+       da.retained_users,
+       ROUND((1.0 * retained_users / max_users)::NUMERIC, 2) AS retention_rate
+FROM daily_activity AS da
+ORDER BY da.day_since_install ASC;
+
+-- Результат
+day_since_install	retained_users	retention_rate
+0	4259	1
+1	2698	0.63
+2	2550	0.6
+3	2421	0.57
+4	2231	0.52
+5	1994	0.47
+6	2129	0.5
+7	2287	0.54
+8	2274	0.53
+9	2207	0.52
+
+-- 4. Расчет LTV
+WITH user_months AS (
+    -- Подсчёт уникальных активных месяцев для каждого пользователя в городе
+    SELECT 
+        au.puid,
+        g.usage_geo_id_name AS city,
+        COUNT(DISTINCT EXTRACT(YEAR FROM au.msk_business_dt_str) * 100 + EXTRACT(MONTH FROM au.msk_business_dt_str)) AS active_months
+    FROM bookmate.audition AS au
+    INNER JOIN bookmate.geo AS g ON au.usage_geo_id = g.usage_geo_id
+    WHERE 
+        g.usage_geo_id_name IN ('Москва', 'Санкт-Петербург')
+        AND au.msk_business_dt_str BETWEEN DATE '2024-09-01' AND DATE '2024-12-11'
+    GROUP BY au.puid, g.usage_geo_id_name
+),
+user_revenue AS(
+    -- расчёт выручки для каждого пользователя
+    SELECT city,
+    puid,
+    active_months*399 AS revenue 
+    FROM user_months
+),
+city_stats AS(
+    -- Подсчёт общего кол-ва пользователей и суммарной выручки по городам
+    SELECT city,
+        COUNT(DISTINCT puid) AS total_users,
+        SUM(revenue) AS total_revenue
+    FROM user_revenue
+    GROUP BY city
+)
+SELECT 
+    city,
+    total_users,
+    ROUND(total_revenue / total_users, 2) AS ltv
+FROM city_stats
+ORDER BY city;
+
+-- Результат
+city	total_users	ltv
+Москва	16808	764.55
+Санкт-Петербург	12559	731.82
+
+-- 5. Расчет средней выручки прослушанного часа - аналога среднего чека
+WITH monthly_stats AS(
+    SELECT EXTRACT(MONTH FROM msk_business_dt_str)::INTEGER AS month,
+    COUNT(DISTINCT puid) AS mau,
+    ROUND(SUM(hours), 2) AS hours
+    FROM bookmate.audition
+    WHERE msk_business_dt_str BETWEEN DATE '2024-09-01' AND DATE '2024-11-30'
+    AND EXTRACT(YEAR FROM msk_business_dt_str) = 2024
+    GROUP BY EXTRACT(MONTH FROM msk_business_dt_str)
+ )
+ SELECT TO_DATE('2024-' || month || '-01', 'YYYY-MM-DD') AS month,
+        mau,
+        hours,
+        ROUND((mau*399)/hours::NUMERIC, 2) AS avg_hour_rev
+FROM monthly_stats
+ORDER BY month;
+
+-- Результат
+month	mau	hours	avg_hour_rev
+2024-09-01	16320	105539	61.7
+2024-10-01	18280	137384	53.09
+2024-11-01	18594	145351	51.04

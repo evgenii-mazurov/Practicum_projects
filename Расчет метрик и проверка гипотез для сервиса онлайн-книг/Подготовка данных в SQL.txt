@@ -1,0 +1,9 @@
+-- Для проверки гипотез отбираем только пользователей из Москвы и Санкт-Петербурга, выведем их активность (сумму часов)
+SELECT g.usage_geo_id_name AS city,
+       au.puid AS puid,
+       SUM(au.hours) AS hours
+FROM bookmate.audition AS au
+INNER JOIN bookmate.geo AS g ON g.usage_geo_id = au.usage_geo_id
+WHERE g.usage_geo_id_name IN ('Москва', 'Санкт-Петербург')
+GROUP BY city, puid
+ORDER BY city;
