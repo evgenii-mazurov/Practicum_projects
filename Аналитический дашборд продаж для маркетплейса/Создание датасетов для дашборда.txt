@@ -1,0 +1,158 @@
+with ord as (
+ select
+   o.order_id,
+      o.order_date,
+      o.status,
+      o.buyer_id,
+      o.total_amount
+ from marketplace.orders o
+ WHERE o.order_date between '01-06-2024' and '31-05-2025'
+), cte as
+(
+    select
+      -- orders
+      o.order_id,
+      o.order_date,
+      o.status AS order_status,
+      o.total_amount AS order_total_amount,
+    
+      -- order_items
+      oi.order_item_id,
+      oi.quantity,
+      oi.price_at_order_time,
+    
+        -- products
+      p.product_id,
+      p.title AS product_title,
+      p.description AS product_description,
+      p.price AS product_price,
+      p.stock_quantity,
+    
+      -- categories
+      c.category_id,
+      c.name AS category_name,
+    --    c.parent_category_id,
+    
+      -- buyer
+      ub.user_id AS buyer_user_id,
+      ub.name AS buyer_name,
+      ub.email AS buyer_email,
+    --    ub.phone AS buyer_phone,
+      ub.registration_date AS buyer_registration_date,
+      ub.is_active AS buyer_is_active,
+    
+      -- seller
+      us.user_id AS seller_user_id,
+      us.name AS seller_name,
+      us.email AS seller_email,
+    --    us.phone AS seller_phone,
+      us.registration_date AS seller_registration_date,
+      us.is_active AS seller_is_active,
+      
+      -- reviews
+      r.review_id,
+      r.rating,
+      r.comment,
+      r.review_date
+      
+    FROM ord o
+    -- Покупатель
+    LEFT JOIN marketplace.users ub ON o.buyer_id = ub.user_id
+    -- Позиции заказа
+    LEFT JOIN marketplace.order_items oi ON o.order_id = oi.order_id
+    -- Продукты
+    LEFT JOIN marketplace.products p ON oi.product_id = p.product_id
+    -- Продавец
+    LEFT JOIN marketplace.users us ON p.seller_id = us.user_id
+    -- Категория товара
+    LEFT JOIN marketplace.categories c ON p.category_id = c.category_id
+    -- Отзывы
+    LEFT JOIN marketplace.reviews r on r.user_id = ub.user_id and r.product_id = p.product_id
+)
+select
+order_id,
+order_date,
+order_status,
+order_total_amount,
+order_item_id,
+quantity,
+price_at_order_time,
+product_id,
+product_description,
+product_title,
+product_price,
+stock_quantity,
+category_id,
+category_name,
+buyer_user_id,
+buyer_name,
+buyer_email,
+buyer_registration_date,
+buyer_is_active,
+seller_user_id,
+seller_name,
+seller_email,
+seller_registration_date,
+seller_is_active,
+review_id,
+rating,
+comment,
+review_date,
+case
+    when order_id is null then null
+    else ROW_NUMBER() OVER (PARTITION BY order_id)
+end AS rn_order_id,
+     case
+    when review_id is null then null
+    else ROW_NUMBER() OVER (PARTITION BY review_id)
+end AS rn_review_id,
+SUM(quantity) OVER (PARTITION BY order_id) as items_per_order,
+AVG(rating) OVER (PARTITION BY product_id) AS avg_product_rating
+from cte;
+
+
+with ord as (
+ select
+   o.order_id,
+      o.order_date,
+      o.status,
+      o.buyer_id,
+      o.total_amount
+ from marketplace.orders o
+ WHERE o.order_date between '01-06-2024' and '31-05-2025'
+), usr as (
+ select
+    u.user_id,
+    u.name,
+    u.email,
+    u.registration_date,
+    u.user_type,
+    u.is_active
+ from marketplace.users u
+ WHERE u.registration_date <= '31-05-2025'
+), cte as
+(select
+    u.user_id,
+    u.name,
+    u.email,
+    u.registration_date,
+    u.user_type,
+    u.is_active,
+    o.order_id,
+    o.order_date,
+    o.total_amount,
+    o.status
+from usr u
+LEFT JOIN ord o on o.buyer_id = u.user_id)
+select
+ user_id,
+    name,
+    email,
+    user_type,
+    registration_date,
+    is_active,
+    order_id,
+    order_date,
+    status,
+    total_amount
+from cte
